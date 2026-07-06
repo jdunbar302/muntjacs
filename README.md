@@ -3,3 +3,5 @@ file:///C:/Users/jdunb/Documents/muntjac/muntjacs.html
 - this code visualises the muntjac observations in the UK
 - it also visualises the observations across Europe
 - it attempts to analyse whether observations have increased over time due to an increase in the user base or not
+- this project was conducted on R Studio using Quarto
+- the data came from the iNaturalist website, using filters in the advanced search option
