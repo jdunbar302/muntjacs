@@ -1,0 +1,376 @@
+---
+title: "Range Change Analysis of Reeves' Muntjac using Citizen Science Data"
+author: "Jake Dunbar"
+format: html
+editor: visual
+---
+
+## 1. Introduction
+
+Reeves' muntjac (*Muntiacus reevesi*) is a small species of deer originally native to South-Eastern China. It was brought to Woburn Park in Bedfordshire in the 1890s, before being released deliberately and by accident into surrounding areas in the 1900-1930s. Its relatively rapid colonisation of other areas of England, its tendency to eat important wildflowers like bluebells, and the fact that it may out-compete other native deer make it a strong example of an invasive species.
+
+Whilst scientists can conduct rigorous studies into the distribution of invasive species, citizen science may also be of aid in tracking the spread of invasive species and in helping to confirm their current range. iNaturalist is a website and app available to the public and one of the most widely used citizen science platforms within ecology/conservation/zoology/botany. In June of 2025, iNaturalist celebrated 250 million verified observations across the world, showing just how widely used this platform is. Additionally, iNaturalist data is fed into the Global Biodiversity Information Facility and thus has contributed to 6 500 scientific publications (iNaturalist, 2025). Citizen science can therefore be of clear help to professional scientists. This project will look at how and if citizen science data can be used to analyse the range and range change of Reeves' muntjac, first at the level of just the UK and then expanding to the regional level of continental Europe.
+
+## 2. iNaturalist observations of Reeves' muntjac in the UK 2015-25
+
+This first simple map plots every observation of Reeves' muntjac in the period of 2015-2025. It can clearly be seen that observations are clustered around the South East and the Midlands, with fewer observations seen further and north and a single observation in Cornwall.
+
+```{r}
+#| echo: false
+#| warning: false
+#| error: false
+#| message: false
+#| fig.show: "hold"
+#| fig-cap: "*Figure 1 - A map plotting all observations of Reeves' muntjac (Muntiacus reevesi) in the UK (2015–2025)*"
+muntjac = read.csv("muntjac.csv")
+
+library(sf)
+library(rnaturalearth)
+library(ggplot2)
+
+
+muntjac_sf <- st_as_sf(
+  muntjac,
+  coords = c("longitude", "latitude"),
+  crs = 4326
+)
+
+
+uk <- ne_countries(
+  country = "United Kingdom",
+  scale = "medium",
+  returnclass = "sf"
+)
+
+ggplot() +
+  geom_sf(data = uk, fill = "darkseagreen", colour = "black") +
+  geom_sf(data = muntjac_sf,
+          colour = "red",
+          size = 1) +
+  theme_minimal()+
+  theme(panel.grid = element_blank()) + 
+  theme(panel.background = element_rect(fill = "lightblue", colour = NA)) +
+  labs(caption = "Source: iNaturalist")
+
+```
+
+The next map breaks down the observations recorded each year into their own map. It also consolidates observations to 20 km2 cells, which are coloured to indicate the number of observations within them. Observations start out sporadically and in 2015 and 2016 do seem to be close to Bedfordshire, where Reeves' muntjac was originally released. They also were observed in the North East. By 2019, a pattern emerges that continues until 2025: Reeves' muntjac seems to have a higher incidence at the core of its range (also close to Bedfordshire), and becomes less frequently observed towards the periphery. This helps to justify that this is in fact the ecological range of Reeves' muntjac and not a random assemblage of observations, else highest incidences would be expected to occur randomly.
+
+```{r}
+#| include: false
+#| echo: false
+#| warning: false
+#| error: false
+#| message: false
+#| fig.show: "hold"
+
+#below are te necessary packages for this part of the cod.
+pkgs <- c("tidyverse", "sf", "ggplot2", "viridis", "rnaturalearth", "rnaturalearthdata")
+install.packages(setdiff(pkgs, rownames(installed.packages())))
+lapply(pkgs, library, character.only = TRUE)
+
+
+
+```
+
+```{r}
+#| echo: false
+#| warning: false
+#| error: false
+#| message: false
+#| fig.show: "hold"
+#| fig-cap: "*Figure 2 - 11 maps showing the Reeves' muntjac (Muntiacus reevesi) observations each year from 2015-2025, with a legend to indicate the number of observations recorded within each 20 km2 cell.*"
+
+#loading the data - this data was downloaded from iNaturalist, filtering from all Reeves' muntjac sightings from 1st January 2015 to 31st December 2025. The spreadsheet used can be located in the files: it only contains the main useful columns like the date of observation and the latitude and longitude.
+mjs <- read_csv("muntjac.csv")
+
+
+#extracting the year from the full date
+mjs <- mjs %>%
+  mutate(year = as.integer(format(as.Date(observed_on, format = "%d/%m/%Y"), "%Y"))) %>%
+  filter(!is.na(latitude), !is.na(longitude), !is.na(year),
+         year >= 2015, year <= 2025)
+
+
+
+#putting the iNaturalist data on the British National Map
+obs_sf <- st_as_sf(mjs, coords = c("longitude", "latitude"), crs = 4326) %>%
+  st_transform(27700)
+
+# extract coordinates
+xy <- as.data.frame(st_coordinates(obs_sf))
+colnames(xy) <- c("easting", "northing")
+
+#putting observations into 20km2 grid
+obs_sf$easting  <- xy$easting
+obs_sf$northing <- xy$northing
+obs_sf$grid_e   <- floor(xy$easting  / 20000) * 20000
+obs_sf$grid_n   <- floor(xy$northing / 20000) * 20000
+obs_df <- st_drop_geometry(obs_sf)
+grid_summary <- obs_df %>%
+  group_by(year, grid_e, grid_n) %>%
+  summarise(n_obs = n(), .groups = "drop")
+
+grid_summary$geometry <- mapply(function(e, n) {
+  st_polygon(list(rbind(
+    c(e,        n),
+    c(e + 20000, n),
+    c(e + 20000, n + 20000),
+    c(e,        n + 20000),
+    c(e,        n)
+  )))
+}, grid_summary$grid_e, grid_summary$grid_n, SIMPLIFY = FALSE)
+
+#convert to shapefile object
+grid_sf <- st_sf(grid_summary, geometry = st_sfc(grid_summary$geometry, crs = 27700))
+grid_sf$geometry.1 <- NULL
+
+
+#loading the UK map for the base. This could have been scaled up to "large" instead of "medium" but requires a better package. So this may be changed for better map resolution.
+uk <- ne_countries(country = "United Kingdom", scale = "medium", returnclass = "sf") %>%
+  st_transform(27700)
+
+#plotting the data that has now been formatted into 20km2 grid squares onto the UK map using ggplot
+p <- ggplot() +
+  geom_sf(data = uk, fill = "grey92", colour = "grey60", linewidth = 0.3) +
+  geom_sf(data = grid_sf, aes(fill = n_obs), colour = NA) +
+  scale_fill_viridis_c(
+    name   = "Observations",
+    option = "plasma",
+    trans  = "log1p",
+    breaks = c(1, 5, 20, 100),
+    labels = c("1", "5", "20", "100+")
+  ) +
+  facet_wrap(~ year, ncol = 4) +
+  coord_sf(
+    xlim = c(0, 700000),
+    ylim = c(0, 700000)
+  ) +
+  labs(
+    title    = "Muntjac deer observations in the UK, 2015–2025",
+    subtitle = "Each cell = 20 km²  ·  Source: iNaturalist",
+    caption  = "Projection: OSGB36 British National Grid (EPSG:27700)"
+  ) +
+  theme_void(base_size = 11) +
+  theme(
+    plot.title       = element_text(face = "bold", size = 14, hjust = 0.5),
+    plot.subtitle    = element_text(size = 9, hjust = 0.5, colour = "grey40"),
+    strip.text       = element_text(face = "bold", size = 10),
+    legend.position  = "bottom",
+    legend.key.width = unit(2, "cm")
+  )
+
+print(p)
+```
+
+The GIF below also animates this increase in observations.
+
+![](muntjac_cumulative.gif){fig-align="center" width="363"}
+
+A major confounding factor to consider is whether the number of muntjac observations has increased because the number of user observing animals on iNaturalist has itself increased. iNaturalist was only released in 2008 and so by 2015 was a relatively new platform, especially to the wider public. In 2015, the user base of iNaturalist was thought to be around 50 000 - 60 000, whereas in 2025 there were thought to be over 4 million active users. To better address this confound, other animals can be compared to see if this pattern was also observed and to compare if the rate of observation increased similarly, shedding some light on whether iNaturalist's data can capture the expansion of Reeves' muntjac. The Western roe deer is native to the UK and so would be expected to have expanded its range significantly over the past decade, but the map below seems to indicate a different story. Prior to 2019, roe deer observations were rare and sporadic, seemingly increasing every year from 2015 to 2025. Therefore, given the assumption that roe deer have not changed their range, the rate of increase of roe deer sighting should be less than the rate of increase in Reeves' muntjac sightings if they have in fact been expanding over the past decade. This principle underlies occupancy analysis - the idea that the number of observations of animal populations known to be relatively stable can be used to estimate user effort, and then this can be used to predict how many Reeves' muntjac users would be likely to observe each year based on an increase in user effort alone. If the the number of Reeves' muntjac observations increases a rate greater than expected if only driven by the increase in user effort, then it may suggest that they are increasing in population and their range.
+
+```{r}
+#| echo: false
+#| warning: false
+#| error: false
+#| message: false
+#| fig.show: "hold"
+#| fig-cap: "*Figure 3 - 11 maps showing the Western roe deer (Capreolus capreolus) observations each year from 2015-2025, with a legend to indicate the number of observations recorded within each 20 km2 cell.*"
+
+
+
+#loading the roe deer data. This was downloaded in the same way, directly from the iNaturalist website. 
+df_all <- read_csv("effort.csv")
+
+#filter for Roe deer only (taxon_id 42184 = Capreolus capreolus)
+df <- df_all %>%
+  filter(taxon_id == 42184)
+
+
+
+#extracting just the year again. The workflow is very similar to above.
+df <- df %>%
+  mutate(year = as.integer(format(as.Date(observed_on, format = "%d/%m/%Y"), "%Y"))) %>%
+  filter(!is.na(latitude), !is.na(longitude), !is.na(year),
+         year >= 2015, year <= 2025)
+
+
+
+#formatting the data points into the grid squares.
+obs_sf <- st_as_sf(df, coords = c("longitude", "latitude"), crs = 4326) %>%
+  st_transform(27700)
+xy <- as.data.frame(st_coordinates(obs_sf))
+colnames(xy) <- c("easting", "northing")  
+
+#assigning the grid squares of 20km2
+obs_sf$easting  <- xy$easting
+obs_sf$northing <- xy$northing
+obs_sf$grid_e   <- floor(xy$easting  / 20000) * 20000
+obs_sf$grid_n   <- floor(xy$northing / 20000) * 20000
+obs_df <- st_drop_geometry(obs_sf)
+
+grid_summary <- obs_df %>%
+  group_by(year, grid_e, grid_n) %>%
+  summarise(n_obs = n(), .groups = "drop")
+
+grid_summary$geometry <- mapply(function(e, n) {
+  st_polygon(list(rbind(
+    c(e,         n),
+    c(e + 20000, n),
+    c(e + 20000, n + 20000),
+    c(e,         n + 20000),
+    c(e,         n)
+  )))
+}, grid_summary$grid_e, grid_summary$grid_n, SIMPLIFY = FALSE)
+
+#convert to shapefile again
+grid_sf <- st_sf(grid_summary, geometry = st_sfc(grid_summary$geometry, crs = 27700))
+grid_sf$geometry.1 <- NULL   
+
+#load the UK base map again
+uk <- ne_countries(country = "United Kingdom", scale = "medium", returnclass = "sf") %>%
+  st_transform(27700)
+
+#plot the points and grid onto the UK map using ggplot
+p <- ggplot() +
+  geom_sf(data = uk, fill = "grey92", colour = "grey60", linewidth = 0.3) +
+  geom_sf(data = grid_sf, aes(fill = n_obs), colour = NA) +
+  scale_fill_viridis_c(
+    name   = "Observations",
+    option = "plasma",
+    trans  = "log1p",
+    breaks = c(1, 5, 20, 100),
+    labels = c("1", "5", "20", "100+")
+  ) +
+  facet_wrap(~ year, ncol = 4) +
+  coord_sf(
+    xlim = c(0, 700000),
+    ylim = c(0, 700000)
+  ) +
+  labs(
+    title    = "Roe deer observations in the UK, 2015–2025",
+    subtitle = "Each cell = 20 km²  ·  Source: iNaturalist",
+    caption  = "Projection: OSGB36 British National Grid (EPSG:27700)"
+  ) +
+  theme_void(base_size = 11) +
+  theme(
+    plot.title       = element_text(face = "bold", size = 14, hjust = 0.5),
+    plot.subtitle    = element_text(size = 9, hjust = 0.5, colour = "grey40"),
+    strip.text       = element_text(face = "bold", size = 10),
+    legend.position  = "bottom",
+    legend.key.width = unit(2, "cm")
+  )
+
+print(p)
+
+
+```
+
+A regression analysis supports this. Comparing the growth rate of observations of Reeves' muntjac to 4 stable UK species (Western roe deer, red fox, badger, and rabbit), the increase in observations for this invasive species seems to be significantly higher. Given these 4 species have stable populations it can be assumed that the increase in observations is due to user effort, whereas for Reeves' muntjac the increase likely reflects, at least partially, an actual increase in the population. The model also has a distance predictor to see if the distance from the core of the muntjac range (defined as being roughly in Bedfordshire) can predict an expansion. This was not significant, so the citizen science data does not capture the expansion from this area (which does make sense given introduction occurred \>100 years ago).
+
+```{r}
+#| echo: false
+#| warning: false
+#| error: false
+#| message: false
+#| fig.show: "hold"
+
+#loading the mammal observations. This was just for red foxes, roe deer, badgers and rabbits, achieved by filtering with the search function on iNaturalist's website.
+effort <- read_csv("effort.csv") %>%
+  mutate(year = as.integer(format(as.Date(observed_on, format = "%d/%m/%Y"), "%Y"))) %>%
+  filter(!is.na(latitude), !is.na(longitude), !is.na(year),
+         year >= 2015, year <= 2025)
+
+#assigned to a 10km2 grid
+effort_sf <- st_as_sf(effort, coords = c("longitude", "latitude"), crs = 4326) %>%
+  st_transform(27700)
+
+effort_xy <- as.data.frame(st_coordinates(effort_sf))
+colnames(effort_xy) <- c("easting", "northing")
+
+effort_sf$grid_e <- floor(effort_xy$easting  / 10000) * 10000
+effort_sf$grid_n <- floor(effort_xy$northing / 10000) * 10000
+
+effort_grid <- st_drop_geometry(effort_sf) %>%
+  group_by(year, grid_e, grid_n) %>%
+  summarise(n_effort = n(), .groups = "drop")
+
+#join muntjac observations to effort in same cell/year
+model_data <- grid_summary %>%                  
+  full_join(effort_grid, by = c("year", "grid_e", "grid_n")) %>%
+  mutate(
+    n_obs    = replace_na(n_obs, 0),          
+    n_effort = replace_na(n_effort, 0),
+
+    #this sets Bedfordshire as the centre, given this is where muntjac expanded from in the UK
+
+    cell_cx  = grid_e + 5000,                  
+    cell_cy  = grid_n + 5000,                 
+    core_x   = 480000,                        
+    core_y   = 230000,                         
+    dist_km  = sqrt((cell_cx - core_x)^2 + (cell_cy - core_y)^2) / 1000,
+    year_c   = year - 2015                    
+  ) %>%
+  filter(n_effort > 0)                        
+
+library(MASS)
+
+# Negative binomial GLM
+# Offset = log(effort) so the model estimates muntjac per observer visit
+# year_c = trend over time after accounting for effort
+# dist_km = does proximity to core range predict occupancy?
+# year_c:dist_km interaction = is expansion accelerating away from core?
+
+model <- glm.nb(
+  n_obs ~ year_c + dist_km + year_c:dist_km + offset(log(n_effort)),
+  data = model_data
+)
+
+summary(model)
+
+```
+
+It could also be that observer bias still explains this increase in muntjac observations, however. Invasive species are often more generalist and can tolerate a wider range of environments, so it may be that muntjac get closer to urban areas and so get recorded by more people. Additionally, it could be that more users record muntjac compared to other medium-sized mammals simply because they know that they are invasive, either because they wish to contribute to citizen science or because they find the animal rarer or more interesting than native species. These are not very testable confounds as it is difficult to accurately assess a user's motive behind recording a particular animal.
+
+```{r}
+#| echo: false
+#| warning: false
+#| error: false
+#| message: false
+#| fig.show: "hold"
+#| fig-cap: "*Figure 4 - A map showing the Reeves' muntjac (Muntiacus reevesi) observations across Europe (2015-2025).*"
+
+#loading all the data for Europe. Again, this can be achieved by filtering on iNaturalist.
+muntjac.eu = read.csv("muntjac.eu.csv")
+
+muntjac.eu_sf <- st_as_sf(
+  muntjac.eu,
+  coords = c("longitude", "latitude"),
+  crs = 4326
+)
+
+#loading the world map. Again, note that the scale could be increased to "large" for a higher resolution map
+world <- ne_countries(scale = "medium", returnclass = "sf")
+
+#plotting the Europe data onto a world map using ggplot. The coordinate alterations towards the bottom ensure that only Europe is captured in the world map.
+ggplot() +
+  geom_sf(data = world, fill = "darkseagreen", colour = "black") +
+  geom_sf(data = muntjac.eu_sf, colour = "red", size = 1.5) +
+  theme_minimal() +
+  theme(panel.grid = element_blank()) +
+  theme(panel.background = element_rect(fill = "lightblue", colour = NA)) +
+  coord_sf(xlim = c(-15, 30), ylim = c(37, 65)) +
+  labs(caption = "Source: iNaturalist")
+
+
+```
+
+The limits of using iNaturalist data to model the expansion of Reeves' muntjac becomes even clearer when expanding this analysis to the whole of Central Europe. There are documented invasive populations of Reeves' muntjac in France, Ireland, Germany, the Netherlands, Belgium, and Denmark (Ward et al, 2021). However, from 2015-2025, a total of 5 observations of Reeves' muntjac were made across mainland Europe: 3 from Belgium and 2 from Austria. Given the known distribution of Reeves' muntjac in Europe, far more observations should be expected.
+
+Interestingly, Ward et al (2021)'s research into the distribution of Reeves' muntjac highlights the Austrian population's status as being based on 'unconfirmed reports only', making it odd that 2/5 of the total observations of this species come from such an unknown population. Looking at the observations on iNaturalist, the first was a dead male specimen recorded in 2017, and the second a live male caught on camera at night in 2022, which the user says was 'seen for several days in the area then captured'. Both observations were made by the same user, but were great distances apart. This could indicate that the status of the Austrian population needs to be more thoroughly assessed. Furthermore, this does highlight one of the important aspects of citizen science, as people local to an area may be able to document species' presence quite effectively, compared to traditional methods like using year-round camera traps that may only cover small areas and be relatively expensive.
+
+Nevertheless, the limits of this data are exemplified in the case of France, which is known to have an established low-density population of Reeves' muntjac, particularly in the Centre-Val de Loire region (Maillard et al, 2024). Despite the fact that this population appears to be growing and may be supplemented by illegal releases, no muntjac have been recorded in the entirety of France in the period 2015-2025 on iNaturalist. This may be because the population exists at such a low density in rural areas that they seldom come into contact with people. In the case of Austria, it shows that rare animals can be detected by citzen science to challenge upheld views about their distribution, but in the case of France, it shows that animals known to exist in a region can go completely undetected.
+
+## 3. Conclusion
+
+Citizen science is a key topic of interest for the fields of ecology and conservation, given it can generate a wealth of data over time across large areas of land, which would be otherwise unfeasible for a single research group to cover (Hognogi et al ,2023). This analysis shows that citizen science certainly has use for informing species presence and ranges, and that it can be used to supplement more robust research. For example, without Ward et al (2021)'s 'undocumented reports' and the iNaturalist observations, it may not have been known that Reeves' muntjac is present in Austria. However, using citizen science data to rigorously address scientific questions about distribution changes over time may be difficult, shown by the increase in observations as user base increases. Additionally, observations are made disproportionately across different continents on iNaturalist, with an overwhelming majoirty made in North America and Europe, with Africa being the least represented (iNaturalist, 2025). This means that applying citizen science data may be more difficult depending on the location. Nevertheless, citizen science data offers a free, alternative line of evidence, and whilst the data here is not conclusive, it is indicative of trends that researchers predict are and will occur (Ward et al, 2021).
