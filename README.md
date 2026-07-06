@@ -1,0 +1,5 @@
+This is a visualisation of the distribution of Reeves' muntjac using citizen science data from iNaturalist, which also attempts to ask whether this data is sufficient to capture the expansion of this species.
+file:///C:/Users/jdunb/Documents/muntjac/muntjacs.html
+- this code visualises the muntjac observations in the UK
+- it also visualises the observations across Europe
+- it attempts to analyse whether observations have increased over time due to an increase in the user base or not
